@@ -296,7 +296,8 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                             threshold=0.6, threshold_back=0.9,
                             beta_mix=0.5, return_diagnostics=False,
                             verify_soft_parity=False,
-                            stability_probe=False):
+                            stability_probe=False,
+                            commit_alpha=1.0):
     """Instrumented WINO with a selectable suspicious-token revision action.
 
     ``remask`` reproduces WINO's H->MASK action. ``soft`` changes only that
@@ -316,8 +317,10 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
     """
     if revision_mode not in {
             'remask', 'soft', 'soft_top1', 'soft_v4', 'soft_v5', 'soft_v6',
-            'soft_renew', 'none'}:
+            'soft_renew', 'soft_interpolation', 'none'}:
         raise ValueError(f"Unknown revision mode: {revision_mode}")
+    if revision_mode == 'soft_interpolation' and not 0.0 <= commit_alpha <= 1.0:
+        raise ValueError(f"commit_alpha must be in [0, 1], got {commit_alpha}")
 
     device = model.device
     x_block = torch.full((1, prompt.shape[1] + gen_length + block_length),
@@ -354,6 +357,8 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
         'soft_parity_max_abs_differences': [],
         'soft_parity_mean_abs_differences': [],
         'unresolved_soft_states': 0,
+        'num_interpolated_identity_commits': 0,
+        'num_interpolated_commit_forwards_consumed': 0,
     }
     unique_revised_positions = set()
     next_event_id = 0
@@ -383,6 +388,9 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
         soft_embeddings = torch.zeros(
             (*x_block.shape, embedding_weight.shape[-1]),
             dtype=embedding_weight.dtype, device=device)
+        interpolated_commit_mask = torch.zeros_like(mask_index_block)
+        interpolated_commit_embeddings = torch.zeros_like(soft_embeddings)
+        interpolated_commit_event_ids = {}
         pending_events = {}
         pending_remask_events = {}
         soft_embedding_history = {}
@@ -395,6 +403,10 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
 
         while mask_index_block.any():
             soft_at_start = soft_mask.clone()
+            commit_at_start = interpolated_commit_mask.clone()
+            if commit_at_start.any():
+                assert not torch.any(commit_at_start & soft_at_start)
+                assert torch.all(~mask_index_block[commit_at_start])
             if soft_at_start.any():
                 assert torch.all(mask_index_block[soft_at_start])
                 local_soft = soft_at_start[:, block_start:block_end]
@@ -405,10 +417,16 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
             max_accept = min(max(int(mask_index_block.sum() * 0.7), 5), 20)
             if revision_mode in {
                     'soft', 'soft_top1', 'soft_v4', 'soft_v5', 'soft_v6',
-                    'soft_renew'} and soft_at_start.any():
+                    'soft_interpolation', 'soft_renew'} and (
+                        soft_at_start.any() or commit_at_start.any()):
                 inputs_embeds = embedding_weight[x_block]
                 inputs_embeds[soft_at_start] = soft_embeddings[soft_at_start]
                 assert torch.equal(inputs_embeds[soft_at_start], soft_embeddings[soft_at_start])
+                inputs_embeds[commit_at_start] = interpolated_commit_embeddings[
+                    commit_at_start]
+                assert torch.equal(
+                    inputs_embeds[commit_at_start],
+                    interpolated_commit_embeddings[commit_at_start])
                 logits = model(None, inputs_embeds=inputs_embeds,
                                attention_mask=attention_mask,
                                position_ids=position_ids).logits
@@ -417,6 +435,18 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                 logits = model(x_block, attention_mask=attention_mask,
                                position_ids=position_ids).logits
             diagnostics['nfe'] += 1
+            if revision_mode == 'soft_interpolation' and commit_at_start.any():
+                consumed_positions = torch.nonzero(
+                    commit_at_start[0], as_tuple=False).flatten().tolist()
+                for absolute_position in consumed_positions:
+                    event_id = interpolated_commit_event_ids.pop(absolute_position)
+                    diagnostics['revision_events'][event_id][
+                        'interpolated_commit_consumed_round'] = step + block_step
+                    diagnostics['revision_events'][event_id][
+                        'interpolated_commit_consumed'] = True
+                diagnostics['num_interpolated_commit_forwards_consumed'] += len(
+                    consumed_positions)
+                interpolated_commit_mask[commit_at_start] = False
 
             logits_with_noise = add_gumbel_noise(logits, temperature=temperature)
             x0 = torch.argmax(logits_with_noise, dim=-1)
@@ -508,9 +538,10 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
             resolved_positions = []
             renewed_positions = []
             identity_correction_event_ids = []
+            interpolation_commits = []
             if revision_mode in {
                     'soft', 'soft_top1', 'soft_v4', 'soft_v5', 'soft_v6',
-                    'soft_renew'} and soft_at_start.any():
+                    'soft_interpolation', 'soft_renew'} and soft_at_start.any():
                 soft_positions_at_start = torch.nonzero(
                     soft_at_start[0], as_tuple=False).flatten().tolist()
                 if stability_probe and soft_positions_at_start:
@@ -586,11 +617,13 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                         p[0, verifier_position], dim=-1)
                     top1_token_id = int(top1_token.item())
                     top1_confidence = float(top1_probability.item())
-                    if revision_mode in {'soft_v4', 'soft_v5', 'soft_v6'}:
+                    if revision_mode in {
+                            'soft_v4', 'soft_v5', 'soft_v6',
+                            'soft_interpolation'}:
                         event['current_top1_token_id'] = top1_token_id
                         event['p_old'] = after_confidence
                         event['p_top1'] = top1_confidence
-                    if revision_mode == 'soft_v6':
+                    if revision_mode in {'soft_v6', 'soft_interpolation'}:
                         # Both distributions already come from this normal WINO
                         # forward.  The original position consumes the SOFT
                         # embedding; the appended position is WINO's shadow
@@ -624,7 +657,9 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                             x_block[0, absolute_position] = new_token_id
                             event['new_token_id'] = new_token_id
                             event['same_token'] = new_token_id == event['token_id']
-                        elif revision_mode in {'soft_v4', 'soft_v5', 'soft_v6'}:
+                        elif revision_mode in {
+                                'soft_v4', 'soft_v5', 'soft_v6',
+                                'soft_interpolation'}:
                             new_token_id = event['original_hard_token_id']
                             x_block[0, absolute_position] = new_token_id
                             event['new_token_id'] = new_token_id
@@ -632,6 +667,10 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                             event['identity_changed'] = False
                             event['final_action'] = 'S->H(a)'
                             event['commit_reason'] = 'p_old>=threshold_back'
+                            if revision_mode == 'soft_interpolation':
+                                event['commit_alpha'] = commit_alpha
+                                event['commit_soft_entropy'] = after_entropy
+                                event['final_committed_representation_type'] = 'hard'
                         mask_index_block[0, absolute_position] = False
                         diagnostics['num_h_to_s_to_h'] += 1
                         diagnostics['num_s_to_h'] += 1
@@ -653,7 +692,8 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                         event['commit_reason'] = 'same_identity_early_recommit'
                         event['outcome'] = 'H->S->H'
                         event['final_transition'] = 'S->H'
-                    elif (revision_mode in {'soft_v4', 'soft_v6'}
+                    elif (revision_mode in {
+                            'soft_v4', 'soft_v6', 'soft_interpolation'}
                           and top1_confidence >= threshold
                           and (revision_mode == 'soft_v4'
                                or top1_token_id != event['original_hard_token_id'])):
@@ -673,6 +713,17 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                         event['commit_reason'] = 'different_identity_correction'
                         event['outcome'] = 'H->S->H'
                         event['final_transition'] = 'S->H'
+                        if revision_mode == 'soft_interpolation':
+                            event['commit_alpha'] = commit_alpha
+                            event['commit_soft_entropy'] = after_entropy
+                            event['final_committed_representation_type'] = (
+                                'one_round_hard_soft_interpolation')
+                            event['interpolated_commit_consumed'] = False
+                            interpolation_commits.append((
+                                absolute_position, event_id, new_token_id,
+                                p[0, verifier_position].to(
+                                    dtype=embedding_weight.dtype)))
+                            diagnostics['num_interpolated_identity_commits'] += 1
                         identity_correction_event_ids.append(event_id)
                     elif revision_mode == 'soft_renew' and after_confidence >= threshold:
                         renewed_embedding = construct_remix_soft_embedding(
@@ -713,24 +764,32 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                         diagnostics['num_s_to_m'] += 1
                         event['outcome'] = 'H->S->M'
                         event['final_transition'] = 'S->M'
-                        if revision_mode in {'soft_v4', 'soft_v5', 'soft_v6'}:
+                        if revision_mode in {
+                                'soft_v4', 'soft_v5', 'soft_v6',
+                                'soft_interpolation'}:
                             event['new_token_id'] = None
                             event['same_token'] = None
                             event['identity_changed'] = False
                             event['final_action'] = 'S->M'
                             event['commit_reason'] = 'mask_fallback'
+                            if revision_mode == 'soft_interpolation':
+                                event['commit_alpha'] = commit_alpha
+                                event['commit_soft_entropy'] = after_entropy
+                                event['final_committed_representation_type'] = 'mask'
                     event['after_confidence'] = after_confidence
                     event['after_entropy'] = after_entropy
                     event['resolved_round'] = step + block_step
                     event['lifetime'] = step + block_step - event['created_round']
                     event['soft_lifetime'] = event['lifetime']
-                    if revision_mode in {'soft_v4', 'soft_v5', 'soft_v6'}:
+                    if revision_mode in {
+                            'soft_v4', 'soft_v5', 'soft_v6',
+                            'soft_interpolation'}:
                         assert event['lifetime'] == 1, (
                             'Soft Revision V4/V5 must resolve after exactly one normal forward')
                     if revision_mode == 'soft_v5' and event['final_transition'] == 'S->H':
                         assert event['new_token_id'] == event['original_hard_token_id'], (
                             'Soft Revision V5 must never change token identity')
-                    if (revision_mode == 'soft_v6'
+                    if (revision_mode in {'soft_v6', 'soft_interpolation'}
                             and event.get('commit_reason') == 'different_identity_correction'):
                         assert event['new_token_id'] != event['original_hard_token_id'], (
                             'Soft Revision V6 correction must change token identity')
@@ -739,6 +798,29 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                     if stability_probe:
                         probe_creation_posteriors.pop(absolute_position, None)
                     resolved_positions.append(absolute_position)
+
+            if revision_mode == 'soft_interpolation' and interpolation_commits:
+                positions = [row[0] for row in interpolation_commits]
+                event_ids = [row[1] for row in interpolation_commits]
+                candidate_ids = torch.tensor(
+                    [row[2] for row in interpolation_commits],
+                    device=device, dtype=torch.long)
+                commit_posteriors = torch.stack(
+                    [row[3] for row in interpolation_commits])
+                # This is the full posterior expectation requested by the
+                # experiment, not V6's H->S ReMix construction.
+                posterior_embeddings = commit_posteriors @ embedding_weight
+                hard_embeddings = embedding_weight[candidate_ids]
+                mixed_embeddings = (
+                    commit_alpha * hard_embeddings
+                    + (1.0 - commit_alpha) * posterior_embeddings)
+                position_tensor = torch.tensor(
+                    positions, device=device, dtype=torch.long)
+                interpolated_commit_embeddings[0, position_tensor] = mixed_embeddings
+                interpolated_commit_mask[0, position_tensor] = True
+                for position, event_id in zip(positions, event_ids):
+                    assert position not in interpolated_commit_event_ids
+                    interpolated_commit_event_ids[position] = event_id
 
             x0 = torch.where(mask_index_block, x0, x_block)
             eligible_mask = mask_index_block & ~soft_at_start
@@ -811,10 +893,19 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                 diagnostics['num_h_to_mask_revisions'] += len(suspicious_positions)
             elif revision_mode in {
                     'soft', 'soft_top1', 'soft_v4', 'soft_v5', 'soft_v6',
-                    'soft_renew'}:
+                    'soft_interpolation', 'soft_renew'}:
                 for event_offset, absolute_position in enumerate(suspicious_positions):
                     verifier_position = tail_start + (absolute_position - block_start)
                     assert x_block[0, absolute_position] != mask_id
+                    if (revision_mode == 'soft_interpolation'
+                            and absolute_position in interpolated_commit_event_ids):
+                        superseded_event_id = interpolated_commit_event_ids.pop(
+                            absolute_position)
+                        interpolated_commit_mask[0, absolute_position] = False
+                        diagnostics['revision_events'][superseded_event_id][
+                            'interpolated_commit_consumed'] = False
+                        diagnostics['revision_events'][superseded_event_id][
+                            'interpolated_commit_superseded_by_revision'] = True
                     compact_soft_embedding = construct_remix_soft_embedding(
                         p[0, verifier_position], embedding_weight,
                         mask_id=mask_id, beta_mix=beta_mix)
@@ -925,6 +1016,16 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
         assert not pending_remask_events, "remasked HARD event was not re-hardened"
         assert not soft_embedding_history, "SOFT embedding history was not cleared"
         assert not probe_creation_posteriors, "probe posterior bookkeeping was not cleared"
+        if revision_mode == 'soft_interpolation' and interpolated_commit_event_ids:
+            # No later model call exists when an identity correction fills the
+            # final MASK(s) in a block. The logical output is already H(b).
+            for event_id in interpolated_commit_event_ids.values():
+                diagnostics['revision_events'][event_id][
+                    'interpolated_commit_consumed'] = False
+                diagnostics['revision_events'][event_id][
+                    'interpolated_commit_terminal_without_next_forward'] = True
+            interpolated_commit_event_ids.clear()
+            interpolated_commit_mask.zero_()
         step += block_step
 
     diagnostics['decoding_rounds'] = step
@@ -974,6 +1075,18 @@ def decoding_wino_soft_revision_v5(model, prompt, **kwargs):
 def decoding_wino_soft_revision_v6(model, prompt, **kwargs):
     """One-round Soft Revision with different-identity correction only."""
     return _decoding_wino_revision(model, prompt, revision_mode='soft_v6', **kwargs)
+
+
+def decoding_wino_soft_interpolation_commitment(
+        model, prompt, commit_alpha=0.5, **kwargs):
+    """V6 identity correction with one-round interpolated commit embedding."""
+    if commit_alpha == 1.0:
+        # Exact control path for the required V6 parity test.
+        return _decoding_wino_revision(
+            model, prompt, revision_mode='soft_v6', **kwargs)
+    return _decoding_wino_revision(
+        model, prompt, revision_mode='soft_interpolation',
+        commit_alpha=commit_alpha, **kwargs)
 
 
 def decoding_wino_no_revision(model, prompt, **kwargs):
