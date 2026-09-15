@@ -12,6 +12,9 @@ def main():
  manifest=jl(OUT/'analysis2_manifest.jsonl')
  for d in DS:
   x=jl(OUT/f'.analysis2_{d}_old.jsonl'); expected=sum(e['dataset']==d for e in manifest);assert len(x)==expected,(d,len(x),expected)
+  for r in x:
+   if 'old_correct' not in r and 'old_is_correct' in r:
+    r['old_correct']=r.pop('old_is_correct')
   if d=='mbpp':
    _,passed=evaluate_mbpp_rows(x)
    for r in x:r['old_correct']=passed[r['task_id']]
