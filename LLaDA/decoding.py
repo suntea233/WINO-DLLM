@@ -110,7 +110,7 @@ def add_gumbel_noise(logits, temperature):
         
      
 @torch.no_grad()
-def decoding_wino(model, prompt, gen_length=128, block_length=128, temperature=0., mask_id=126336, threshold=0.6, threshold_back=0.9):
+def decoding_wino(model, prompt, gen_length=128, block_length=128, temperature=0., mask_id=126336, threshold=0.6, threshold_back=0.9, return_identity_trace=False):
 
     device = model.device
     x_block = torch.full((1, prompt.shape[1] + gen_length + block_length), mask_id, dtype=torch.long).to(model.device)
@@ -121,6 +121,8 @@ def decoding_wino(model, prompt, gen_length=128, block_length=128, temperature=0
     assert gen_length % block_length == 0
     num_blocks = gen_length // block_length
     step = 0
+    remask_identity_events = []
+    pending_remask_events = {}
     
 
     for num_block in range(num_blocks):
@@ -166,6 +168,15 @@ def decoding_wino(model, prompt, gen_length=128, block_length=128, temperature=0
                     max_confidence_index = torch.argmax(confidence)
                     transfer_index.view(-1)[max_confidence_index] = True
             x_block[transfer_index] = x0[transfer_index]
+            if return_identity_trace and pending_remask_events:
+                for absolute_position in torch.nonzero(transfer_index[0], as_tuple=False).flatten().tolist():
+                    if absolute_position not in pending_remask_events:
+                        continue
+                    event = remask_identity_events[pending_remask_events.pop(absolute_position)]
+                    event['new_token_id'] = int(x_block[0, absolute_position].item())
+                    event['rehardening_round'] = step + block_step
+                    event['same_token'] = event['new_token_id'] == event['original_token_id']
+                    event['rounds_spent_remasked'] = event['rehardening_round'] - event['remask_round']
             
             num_accept = transfer_index.sum()
             
@@ -183,6 +194,15 @@ def decoding_wino(model, prompt, gen_length=128, block_length=128, temperature=0
             
             remask_index_shift = torch.zeros_like(remask_index)
             remask_index_shift[:, prompt.shape[1] + num_block * block_length: prompt.shape[1] + (num_block + 1) * block_length] = remask_index[:, -block_length:]
+            if return_identity_trace:
+                for absolute_position in torch.nonzero(remask_index_shift[0], as_tuple=False).flatten().tolist():
+                    assert absolute_position not in pending_remask_events
+                    event_id = len(remask_identity_events)
+                    remask_identity_events.append({'event_id':event_id,'block':num_block,
+                        'position':absolute_position,
+                        'original_token_id':int(x_block[0,absolute_position].item()),
+                        'remask_round':step+block_step})
+                    pending_remask_events[absolute_position]=event_id
             x_block[remask_index_shift] = mask_id
             mask_index_block[transfer_index] = False
             mask_index_block[remask_index_shift] = True
@@ -195,7 +215,12 @@ def decoding_wino(model, prompt, gen_length=128, block_length=128, temperature=0
 
         step += block_step
 
-    return x_block[:, :prompt.shape[1] + gen_length], step
+    result = x_block[:, :prompt.shape[1] + gen_length], step
+    if return_identity_trace:
+        assert not pending_remask_events
+        return result[0], result[1], {'nfe':step,
+            'remask_identity_events':remask_identity_events}
+    return result
 
 
 def construct_remix_soft_embedding(posterior, embedding_weight, mask_id=126336,
