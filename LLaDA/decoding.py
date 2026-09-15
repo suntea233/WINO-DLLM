@@ -296,7 +296,7 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                             threshold=0.6, threshold_back=0.9,
                             beta_mix=0.5, return_diagnostics=False,
                             verify_soft_parity=False,
-                            stability_probe=False):
+                            stability_probe=False, oracle_branch=None):
     """Instrumented WINO with a selectable suspicious-token revision action.
 
     ``remask`` reproduces WINO's H->MASK action. ``soft`` changes only that
@@ -354,6 +354,7 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
         'soft_parity_max_abs_differences': [],
         'soft_parity_mean_abs_differences': [],
         'unresolved_soft_states': 0,
+        'oracle_event': None,
     }
     unique_revised_positions = set()
     next_event_id = 0
@@ -659,21 +660,51 @@ def _decoding_wino_revision(model, prompt, revision_mode, gen_length=128,
                                or top1_token_id != event['original_hard_token_id'])):
                         pending_events.pop(absolute_position)
                         new_token_id = top1_token_id
+                        commit_probability = top1_probability
+                        if oracle_branch is not None and event_id == oracle_branch['event_id']:
+                            assert revision_mode == 'soft_v6'
+                            assert absolute_position == oracle_branch['position']
+                            assert num_block == oracle_branch['block']
+                            assert step + block_step == oracle_branch['round']
+                            ranked = torch.topk(p[0, verifier_position], k=4)
+                            candidates = [int(v) for v in ranked.indices.tolist()]
+                            probabilities = [float(v) for v in ranked.values.tolist()]
+                            assert candidates[0] == top1_token_id
+                            branch = oracle_branch['branch']
+                            assert branch in {'B1', 'B2', 'B3', 'B4', 'OLD'}
+                            new_token_id = (event['original_hard_token_id'] if branch == 'OLD'
+                                            else candidates[int(branch[1]) - 1])
+                            commit_probability = p[0, verifier_position, new_token_id]
+                            diagnostics['oracle_event'] = {
+                                'event_id': event_id, 'round': step + block_step,
+                                'block': num_block, 'position': absolute_position,
+                                'old_token_id': event['original_hard_token_id'],
+                                'candidate_ids': candidates,
+                                'candidate_probabilities': probabilities,
+                                'selected_branch': branch,
+                                'selected_token_id': new_token_id,
+                            }
                         x_block[0, absolute_position] = new_token_id
                         # Downstream WINO verification must score the newly
                         # committed token, rather than retaining p(old H).
-                        x0_p[0, verifier_position] = top1_probability
+                        x0_p[0, verifier_position] = commit_probability
                         mask_index_block[0, absolute_position] = False
                         diagnostics['num_h_to_s_to_h'] += 1
                         diagnostics['num_s_to_h'] += 1
                         event['new_token_id'] = new_token_id
                         event['same_token'] = new_token_id == event['original_hard_token_id']
                         event['identity_changed'] = not event['same_token']
-                        event['final_action'] = 'S->H(b)'
-                        event['commit_reason'] = 'different_identity_correction'
+                        event['final_action'] = ('S->H(a)' if new_token_id == event['original_hard_token_id']
+                                                 else 'S->H(b)')
+                        event['commit_reason'] = ('oracle_keep_old' if oracle_branch is not None
+                                                   and diagnostics['oracle_event'] is not None
+                                                   and diagnostics['oracle_event']['event_id'] == event_id
+                                                   and new_token_id == event['original_hard_token_id']
+                                                   else 'different_identity_correction')
                         event['outcome'] = 'H->S->H'
                         event['final_transition'] = 'S->H'
-                        identity_correction_event_ids.append(event_id)
+                        if event['identity_changed']:
+                            identity_correction_event_ids.append(event_id)
                     elif revision_mode == 'soft_renew' and after_confidence >= threshold:
                         renewed_embedding = construct_remix_soft_embedding(
                             p[0, verifier_position], embedding_weight,
