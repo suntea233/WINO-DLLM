@@ -1,0 +1,122 @@
+{
+  "gsm8k": {
+    "v1_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision_v6_control_v1/gsm8k_soft_revision.json",
+    "v6_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision_v6/gsm8k_soft_revision_v6.json",
+    "total": 1319,
+    "v6_correct": 1040,
+    "groups": {
+      "recovered": 17,
+      "regressed": 21,
+      "both_wrong": 258,
+      "both_correct": 1023
+    },
+    "selected_identity_events": 58,
+    "eligible_recovered": 17,
+    "eligible_regressed": 21,
+    "rank_rescues": {
+      "B2": 9,
+      "B3": 9,
+      "B4": 7
+    },
+    "any_alternative_rescue": 10,
+    "old_rescue": 10,
+    "oracle_alt_accuracy": 0.796057619408643,
+    "oracle_gain_pp": 0.7581501137225171,
+    "recovered_top1_only": 3,
+    "recovered_b1_plus_alternative_correct": 14,
+    "recovered_multiple_alternatives_correct": 14,
+    "recovered_old_correct": 14,
+    "both_wrong_alt_rescue": 0,
+    "both_wrong_old_rescue": 0
+  },
+  "math500": {
+    "v1_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision/math500_soft_revision.json",
+    "v6_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision_v6/math500_soft_revision_v6.json",
+    "total": 500,
+    "v6_correct": 173,
+    "groups": {
+      "recovered": 25,
+      "regressed": 22,
+      "both_wrong": 305,
+      "both_correct": 148
+    },
+    "selected_identity_events": 50,
+    "eligible_recovered": 14,
+    "eligible_regressed": 16,
+    "rank_rescues": {
+      "B2": 1,
+      "B3": 0,
+      "B4": 0
+    },
+    "any_alternative_rescue": 1,
+    "old_rescue": 1,
+    "oracle_alt_accuracy": 0.348,
+    "oracle_gain_pp": 0.2,
+    "recovered_top1_only": 1,
+    "recovered_b1_plus_alternative_correct": 13,
+    "recovered_multiple_alternatives_correct": 12,
+    "recovered_old_correct": 12,
+    "both_wrong_alt_rescue": 0,
+    "both_wrong_old_rescue": 0
+  },
+  "mbpp": {
+    "v1_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision/mbpp_soft_revision.json",
+    "v6_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision_v6/mbpp_soft_revision_v6.json",
+    "total": 500,
+    "v6_correct": 180,
+    "groups": {
+      "recovered": 8,
+      "regressed": 10,
+      "both_wrong": 310,
+      "both_correct": 172
+    },
+    "selected_identity_events": 25,
+    "eligible_recovered": 0,
+    "eligible_regressed": 5,
+    "rank_rescues": {
+      "B2": 2,
+      "B3": 3,
+      "B4": 1
+    },
+    "any_alternative_rescue": 3,
+    "old_rescue": 2,
+    "oracle_alt_accuracy": 0.366,
+    "oracle_gain_pp": 0.6,
+    "recovered_top1_only": 0,
+    "recovered_b1_plus_alternative_correct": 0,
+    "recovered_multiple_alternatives_correct": 0,
+    "recovered_old_correct": 0,
+    "both_wrong_alt_rescue": 0,
+    "both_wrong_old_rescue": 0
+  },
+  "humaneval": {
+    "v1_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision/humaneval_soft_revision.json",
+    "v6_file": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision_v6/humaneval_soft_revision_v6.json",
+    "total": 164,
+    "v6_correct": 72,
+    "groups": {
+      "recovered": 6,
+      "regressed": 3,
+      "both_wrong": 89,
+      "both_correct": 66
+    },
+    "selected_identity_events": 26,
+    "eligible_recovered": 4,
+    "eligible_regressed": 2,
+    "rank_rescues": {
+      "B2": 0,
+      "B3": 0,
+      "B4": 0
+    },
+    "any_alternative_rescue": 0,
+    "old_rescue": 0,
+    "oracle_alt_accuracy": 0.43902439024390244,
+    "oracle_gain_pp": 0.0,
+    "recovered_top1_only": 0,
+    "recovered_b1_plus_alternative_correct": 4,
+    "recovered_multiple_alternatives_correct": 4,
+    "recovered_old_correct": 4,
+    "both_wrong_alt_rescue": 0,
+    "both_wrong_old_rescue": 0
+  }
+}
