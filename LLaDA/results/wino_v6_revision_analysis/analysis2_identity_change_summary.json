@@ -1,0 +1,79 @@
+{
+  "datasets": {
+    "gsm8k": {
+      "samples": 1110,
+      "new_only": 13,
+      "old_only": 14,
+      "both_correct": 859,
+      "both_wrong": 224,
+      "percentages": {
+        "new_only": 0.011711711711711712,
+        "old_only": 0.012612612612612612,
+        "both_correct": 0.7738738738738739,
+        "both_wrong": 0.2018018018018018
+      }
+    },
+    "math500": {
+      "samples": 304,
+      "new_only": 4,
+      "old_only": 3,
+      "both_correct": 94,
+      "both_wrong": 203,
+      "percentages": {
+        "new_only": 0.013157894736842105,
+        "old_only": 0.009868421052631578,
+        "both_correct": 0.3092105263157895,
+        "both_wrong": 0.6677631578947368
+      }
+    },
+    "mbpp": {
+      "samples": 97,
+      "new_only": 0,
+      "old_only": 2,
+      "both_correct": 30,
+      "both_wrong": 65,
+      "percentages": {
+        "new_only": 0.0,
+        "old_only": 0.020618556701030927,
+        "both_correct": 0.30927835051546393,
+        "both_wrong": 0.6701030927835051
+      }
+    },
+    "humaneval": {
+      "samples": 86,
+      "new_only": 1,
+      "old_only": 0,
+      "both_correct": 33,
+      "both_wrong": 52,
+      "percentages": {
+        "new_only": 0.011627906976744186,
+        "old_only": 0.0,
+        "both_correct": 0.38372093023255816,
+        "both_wrong": 0.6046511627906976
+      }
+    }
+  },
+  "aggregate": {
+    "samples": 1597,
+    "new_only": 18,
+    "old_only": 19,
+    "both_correct": 1016,
+    "both_wrong": 544
+  },
+  "by_v6_correctness": {
+    "V6_correct": {
+      "samples": 1034,
+      "new_only": 18,
+      "old_only": 0,
+      "both_correct": 1016,
+      "both_wrong": 0
+    },
+    "V6_wrong": {
+      "samples": 563,
+      "new_only": 0,
+      "old_only": 19,
+      "both_correct": 0,
+      "both_wrong": 544
+    }
+  }
+}
