@@ -1,0 +1,101 @@
+{
+  "rule": "last box in final <answer>; normalize HH:00 time to hour; otherwise legacy fallback",
+  "runs": {
+    "WINO": {
+      "source": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision/gsm8k_wino_remask.json",
+      "total": 1319,
+      "official_correct": 1023,
+      "audited_correct": 1024,
+      "prediction_or_correctness_changes": [
+        {
+          "sample_id": 1001,
+          "reference_answer": 2.0,
+          "stored_prediction": 0.0,
+          "audited_prediction": 2.0,
+          "stored_correct": false,
+          "audited_correct": true,
+          "source": "final_time_box"
+        }
+      ]
+    },
+    "V6": {
+      "source": "/root/lx/WINO-DLLM/LLaDA/results/soft_revision_v6/gsm8k_soft_revision_v6.json",
+      "total": 1319,
+      "official_correct": 1040,
+      "audited_correct": 1041,
+      "prediction_or_correctness_changes": [
+        {
+          "sample_id": 1001,
+          "reference_answer": 2.0,
+          "stored_prediction": 0.0,
+          "audited_prediction": 2.0,
+          "stored_correct": false,
+          "audited_correct": true,
+          "source": "final_time_box"
+        }
+      ]
+    },
+    "Explicit Factorized Soft": {
+      "source": "/root/lx/WINO-DLLM/LLaDA/results/explicit_factorized_soft/explicit_factorized_soft_results.json",
+      "total": 1319,
+      "official_correct": 1035,
+      "audited_correct": 1036,
+      "prediction_or_correctness_changes": [
+        {
+          "sample_id": 1001,
+          "reference_answer": 2.0,
+          "stored_prediction": 0.0,
+          "audited_prediction": 2.0,
+          "stored_correct": false,
+          "audited_correct": true,
+          "source": "final_time_box"
+        }
+      ]
+    },
+    "Factorized Logical Slot": {
+      "source": "/root/lx/WINO-DLLM/LLaDA/results/factorized_logical_slot/factorized_logical_slot_results.json",
+      "total": 1319,
+      "official_correct": 1039,
+      "audited_correct": 1042,
+      "prediction_or_correctness_changes": [
+        {
+          "sample_id": 839,
+          "reference_answer": 2.0,
+          "stored_prediction": 10.0,
+          "audited_prediction": 2.0,
+          "stored_correct": false,
+          "audited_correct": true,
+          "source": "final_answer_box"
+        },
+        {
+          "sample_id": 868,
+          "reference_answer": 15.0,
+          "stored_prediction": 1.25,
+          "audited_prediction": 15.0,
+          "stored_correct": false,
+          "audited_correct": true,
+          "source": "final_answer_box"
+        },
+        {
+          "sample_id": 1001,
+          "reference_answer": 2.0,
+          "stored_prediction": 0.0,
+          "audited_prediction": 2.0,
+          "stored_correct": false,
+          "audited_correct": true,
+          "source": "final_time_box"
+        }
+      ]
+    }
+  },
+  "paired": {
+    "Explicit Factorized Soft vs V6": {
+      "recovered": 53,
+      "regressed": 58
+    },
+    "Explicit Factorized Soft vs WINO": {
+      "recovered": 84,
+      "regressed": 72
+    }
+  }
+}
